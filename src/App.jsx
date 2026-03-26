@@ -2,9 +2,8 @@ import { useState, useEffect } from "react";
 
 // ========== НАСТРОЙКИ ==========
 // Замени на свои после создания бота через @BotFather
-const TG_BOT_TOKEN = "YOUR_BOT_TOKEN";
-const TG_CHAT_ID = "YOUR_CHAT_ID"; // Твой личный chat_id
 const TG_LINK = "https://t.me/sovkoandrei";
+const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : null;
 
 // ========== ВОПРОСЫ ==========
 const QUESTIONS = [
@@ -199,22 +198,15 @@ function getResult(scores) {
   return winner;
 }
 
-async function sendToTelegram(name, tg, result, scores, answers) {
-  if (TG_BOT_TOKEN === "YOUR_BOT_TOKEN") return;
-  const r = RESULTS[result];
-  const text = `🔴 НОВАЯ ЗАЯВКА С КВИЗА\n\n` +
-    `Имя: ${name}\n` +
-    `Telegram: ${tg}\n\n` +
-    `Стопор: ${r.tag}\n` +
-    `Скоринг: перегрев=${scores.burnout} | деньги=${scores.money} | на мне=${scores.me} | хаос=${scores.chaos}\n\n` +
-    `Ответы:\n${answers.map((a, i) => `${i + 1}. ${a.join(", ")}`).join("\n")}`;
+function sendToBot(payload) {
+  if (!tg?.sendData) return false;
   try {
-    await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: "HTML" }),
-    });
-  } catch (e) { console.log("TG send error", e); }
+    tg.sendData(JSON.stringify(payload));
+    return true;
+  } catch (e) {
+    console.log("sendData error", e);
+    return false;
+  }
 }
 
 // ========== COMPONENTS ==========
@@ -412,89 +404,6 @@ function QuizScreen({ question, index, total, onAnswer, onBack }) {
   );
 }
 
-function ContactScreen({ onSubmit }) {
-  const [name, setName] = useState("");
-  const [tg, setTg] = useState("");
-  const [v, setV] = useState(false);
-
-  useEffect(() => { setTimeout(() => setV(true), 100); }, []);
-
-  const inputStyle = {
-    width: "100%", padding: "15px 16px", borderRadius: 12,
-    border: "1.5px solid #222", background: "#111",
-    color: "#F5F5F0", fontSize: 16, outline: "none",
-    boxSizing: "border-box", transition: "border-color 0.2s"
-  };
-
-  return (
-    <div style={{
-      minHeight: "100dvh", display: "flex", flexDirection: "column",
-      justifyContent: "center", padding: "40px 24px",
-      opacity: v ? 1 : 0, transition: "opacity 0.5s ease"
-    }}>
-      <div style={{
-        width: 52, height: 52, borderRadius: 14, marginBottom: 20,
-        background: "#FF6B4A18", display: "flex",
-        alignItems: "center", justifyContent: "center"
-      }}>
-        <span style={{ fontSize: 24, color: "#FF6B4A" }}>✓</span>
-      </div>
-
-      <h2 style={{
-        fontSize: 24, fontWeight: 800, color: "#F5F5F0", marginBottom: 8
-      }}>
-        Готово. Я уже вижу твой главный стопор.
-      </h2>
-      <p style={{
-        fontSize: 15, color: "#888", lineHeight: 1.6, marginBottom: 28
-      }}>
-        Оставь имя и Telegram — увидишь персональный результат: где стопор и с чего начать.
-      </p>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
-        <input
-          placeholder="Имя"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          style={inputStyle}
-          onFocus={e => e.target.style.borderColor = "#FF6B4A"}
-          onBlur={e => e.target.style.borderColor = "#222"}
-        />
-        <input
-          placeholder="@username в Telegram"
-          value={tg}
-          onChange={e => setTg(e.target.value)}
-          style={inputStyle}
-          onFocus={e => e.target.style.borderColor = "#FF6B4A"}
-          onBlur={e => e.target.style.borderColor = "#222"}
-        />
-      </div>
-
-      <button
-        onClick={() => onSubmit(name, tg)}
-        disabled={!name || !tg}
-        style={{
-          width: "100%", padding: "17px 0", borderRadius: 14,
-          background: (!name || !tg) ? "#222" : "#FF6B4A",
-          color: (!name || !tg) ? "#555" : "#fff",
-          fontSize: 17, fontWeight: 700, border: "none",
-          cursor: (!name || !tg) ? "default" : "pointer",
-          transition: "all 0.3s ease"
-        }}
-      >
-        Получить результат
-      </button>
-
-      <p style={{
-        fontSize: 12, color: "#444", textAlign: "center",
-        marginTop: 14, lineHeight: 1.5
-      }}>
-        Это не автоворонка. Я сам смотрю каждый ответ и пишу в Telegram.
-      </p>
-    </div>
-  );
-}
-
 function CycleVisual({ color }) {
   const items = ["Перегрев", "Кривые решения", "Потеря денег", "Тревога и ручной режим"];
   return (
@@ -547,7 +456,7 @@ function CycleVisual({ color }) {
   );
 }
 
-function ResultScreen({ result, userName }) {
+function ResultScreen({ result, userName, onContinue, sentToBot, inTelegram }) {
   const r = RESULTS[result];
   const [v, setV] = useState(false);
   useEffect(() => { setTimeout(() => setV(true), 100); }, []);
@@ -742,17 +651,28 @@ function ResultScreen({ result, userName }) {
         <p style={{
           fontSize: 14, color: "#888", lineHeight: 1.6, marginBottom: 22
         }}>
-          30–40 минут. Найдём главный узел, покажу что чинить первым. В конце скажу, есть ли смысл идти глубже.
+          Сначала забери результат в Telegram. Там он сохранится, и бот даст тебе следующий шаг.
         </p>
 
+        {inTelegram ? (
+        <button onClick={onContinue} style={{
+          display: "block", width: "100%", padding: "17px 0", borderRadius: 14,
+          background: r.color, color: "#fff", fontSize: 17,
+          fontWeight: 700, border: "none", cursor: "pointer",
+          boxShadow: `0 6px 28px ${r.color}35`
+        }}>
+          {sentToBot ? "Результат уже отправлен в Telegram" : "Открыть результат в Telegram"}
+        </button>
+      ) : (
         <a href={TG_LINK} target="_blank" rel="noopener noreferrer" style={{
           display: "block", width: "100%", padding: "17px 0", borderRadius: 14,
           background: r.color, color: "#fff", fontSize: 17,
           fontWeight: 700, textDecoration: "none",
           boxShadow: `0 6px 28px ${r.color}35`
         }}>
-          Написать Андрею →
+          Открыть Telegram →
         </a>
+      )}
 
         <div style={{
           marginTop: 22, paddingTop: 18,
@@ -764,7 +684,7 @@ function ResultScreen({ result, userName }) {
           <p style={{
             fontSize: 12, color: r.color, marginTop: 8, fontStyle: "italic"
           }}>
-            Я сам смотрю каждую анкету. Это не автоворонка.
+            После отправки бот сохранит результат и покажет следующий шаг.
           </p>
         </div>
       </div>
@@ -779,8 +699,18 @@ export default function App() {
   const [qIndex, setQIndex] = useState(0);
   const [scores, setScores] = useState({ burnout: 0, money: 0, me: 0, chaos: 0 });
   const [answers, setAnswers] = useState([]);
+  const [qualification, setQualification] = useState("");
   const [result, setResult] = useState(null);
   const [userName, setUserName] = useState("");
+  const [sentToBot, setSentToBot] = useState(false);
+  const inTelegram = Boolean(tg?.initDataUnsafe?.user);
+
+  useEffect(() => {
+    tg?.ready?.();
+    tg?.expand?.();
+    const firstName = tg?.initDataUnsafe?.user?.first_name || "";
+    if (firstName) setUserName(firstName);
+  }, []);
 
   const handleStart = () => setScreen("quiz");
 
@@ -792,6 +722,8 @@ export default function App() {
       const newScores = { ...scores };
       chosen.forEach(o => { newScores[o.s] = (newScores[o.s] || 0) + 1; });
       setScores(newScores);
+    } else {
+      setQualification(chosen[0]?.text || "");
     }
 
     setAnswers(newAnswers);
@@ -799,7 +731,14 @@ export default function App() {
     if (qIndex < QUESTIONS.length - 1) {
       setQIndex(qIndex + 1);
     } else {
-      setScreen("contact");
+      const finalScores = !QUESTIONS[qIndex].qual ? (() => {
+        const newScores = { ...scores };
+        chosen.forEach(o => { newScores[o.s] = (newScores[o.s] || 0) + 1; });
+        return newScores;
+      })() : scores;
+      const r = getResult(finalScores);
+      setResult(r);
+      setScreen("result");
     }
   };
 
@@ -821,12 +760,20 @@ export default function App() {
     }
   };
 
-  const handleContact = (name, tg) => {
-    setUserName(name);
-    const r = getResult(scores);
-    setResult(r);
-    sendToTelegram(name, tg, r, scores, answers);
-    setScreen("result");
+  const handleContinue = () => {
+    if (!result) return;
+
+    const payload = {
+      stopor: result,
+      scores,
+      answers,
+      qualification,
+    };
+
+    if (sendToBot(payload)) {
+      setSentToBot(true);
+      setTimeout(() => tg?.close?.(), 400);
+    }
   };
 
   return (
@@ -846,8 +793,7 @@ export default function App() {
           onBack={handleBack}
         />
       )}
-      {screen === "contact" && <ContactScreen onSubmit={handleContact} />}
-      {screen === "result" && <ResultScreen result={result} userName={userName} />}
+      {screen === "result" && <ResultScreen result={result} userName={userName} onContinue={handleContinue} sentToBot={sentToBot} inTelegram={inTelegram} />}
     </div>
   );
 }
